@@ -75,7 +75,7 @@ func (c *Client) Courses(ctx context.Context) ([]*Course, error) {
 	var courses []*Course
 	section := ""
 	rank := 1
-	for _, line := range strings.Split(string(body), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		if m := headingRe.FindStringSubmatch(line); m != nil {
 			section = strings.TrimSpace(m[1])
 			continue
