@@ -1,62 +1,61 @@
-package ossucs
+package ossucs_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
+
+	"github.com/tamnd/ossucs-cli/ossucs"
 )
 
-func TestGet(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("User-Agent") == "" {
-			t.Error("request carried no User-Agent")
-		}
-		_, _ = w.Write([]byte("ok"))
-	}))
-	defer srv.Close()
+const fakeReadme = `## Intro CS
 
-	c := NewClient()
-	c.Rate = 0 // no pacing in the test
+| Courses | Duration | Effort |
+| :--: | :--: | :--: |
+[Introduction to Python](https://example.com/python) | 14 weeks | 10 hrs/week
 
-	body, err := c.Get(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(body) != "ok" {
-		t.Errorf("body = %q, want %q", body, "ok")
-	}
+### Core programming
+
+[Systematic Program Design](coursepages/spd/README.md) | 13 weeks | 8 hrs/week
+[Class-based Program Design](https://example.com/class) | 13 weeks | 5 hrs/week
+`
+
+func newTestClient(ts *httptest.Server) *ossucs.Client {
+	cfg := ossucs.DefaultConfig()
+	cfg.BaseURL = ts.URL
+	cfg.Rate = 0
+	return ossucs.NewClient(cfg)
 }
 
-func TestGetRetriesOn503(t *testing.T) {
-	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		if hits < 3 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = w.Write([]byte("recovered"))
+func TestCourses(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, fakeReadme)
 	}))
-	defer srv.Close()
+	defer ts.Close()
 
-	c := NewClient()
-	c.Rate = 0
-	c.Retries = 5
-
-	start := time.Now()
-	body, err := c.Get(context.Background(), srv.URL)
+	c := newTestClient(ts)
+	courses, err := c.Courses(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "recovered" {
-		t.Errorf("body = %q after retries", body)
+	if len(courses) != 3 {
+		t.Fatalf("want 3, got %d", len(courses))
 	}
-	if hits != 3 {
-		t.Errorf("server saw %d hits, want 3", hits)
+	if courses[0].Section != "Intro CS" {
+		t.Errorf("Section[0] = %q", courses[0].Section)
 	}
-	if time.Since(start) < 500*time.Millisecond {
-		t.Error("retries did not back off")
+	if courses[0].Title != "Introduction to Python" {
+		t.Errorf("Title[0] = %q", courses[0].Title)
+	}
+	if courses[1].Section != "Core programming" {
+		t.Errorf("Section[1] = %q", courses[1].Section)
+	}
+	if courses[1].URL != "https://github.com/ossu/computer-science/blob/master/coursepages/spd/README.md" {
+		t.Errorf("URL[1] = %q", courses[1].URL)
+	}
+	if courses[0].Rank != 1 {
+		t.Errorf("Rank = %d, want 1", courses[0].Rank)
 	}
 }

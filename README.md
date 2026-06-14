@@ -1,10 +1,10 @@
 # ossucs
 
-A command line for ossucs.
+Browse the Open Source Society University Computer Science curriculum from the command line.
 
-`ossucs` is a single pure-Go binary. It reads public ossucs data
-over plain HTTPS, shapes it into clean records, and prints output that pipes
-into the rest of your tools. No API key, nothing to run alongside it.
+`ossucs` is a single pure-Go binary. It reads the OSSU CS curriculum from GitHub
+over plain HTTPS, shapes it into clean records, and prints output that pipes into
+the rest of your tools. No API key, nothing to run alongside it.
 
 The same package is also a [resource-URI driver](#use-it-as-a-resource-uri-driver),
 so a host program like [ant](https://github.com/tamnd/ant) can address
@@ -26,10 +26,11 @@ docker run --rm ghcr.io/tamnd/ossucs:latest --help
 ## Usage
 
 ```bash
-ossucs page <path>                      # fetch one page as a record
-ossucs page <path> -o json              # as JSON, ready for jq
-ossucs page <path> --template '{{.Body}}'  # just the readable body text
-ossucs links <path>                     # the pages it links to, one per line
+ossucs courses                          # list all ~54 courses in the OSSU CS curriculum
+ossucs courses -o json                  # as JSON, ready for jq
+ossucs courses -o csv                   # as CSV for spreadsheets
+ossucs courses --fields section,title   # pick columns
+ossucs courses -n 10                    # first 10 courses
 ossucs --help                           # the whole command tree
 ```
 
@@ -38,24 +39,19 @@ Every command shares one output contract: `-o table|json|jsonl|csv|tsv|url|raw`,
 The default adapts to where output goes (a table on a terminal, JSONL in a
 pipe), so the same command reads well by hand and parses cleanly downstream.
 
-This is a fresh scaffold. It ships one example resource type, `page`, wired end
-to end. Model the real ossucs records in `ossucs/` and declare their
-operations in `ossucs/domain.go`; each one becomes a command, an HTTP
-route, and an MCP tool at once.
-
 ## Serve it
 
 The same operations are available over HTTP and as an MCP tool set for agents,
 with no extra code:
 
 ```bash
-ossucs serve --addr :7777    # GET /v1/page/<path>  returns NDJSON
+ossucs serve --addr :7777    # GET /v1/courses  returns NDJSON
 ossucs mcp                   # speak MCP over stdio
 ```
 
 ## Use it as a resource-URI driver
 
-`ossucs` registers a `ossucs` domain the way a program registers a
+`ossucs` registers an `ossucs` domain the way a program registers a
 database driver with `database/sql`. A host enables it with one blank import:
 
 ```go
@@ -66,19 +62,16 @@ Then [ant](https://github.com/tamnd/ant) (or any program that links the package)
 dereferences `ossucs://` URIs without knowing anything about ossucs:
 
 ```bash
-ant get ossucs://page/<path>   # fetch the record
-ant cat ossucs://page/<path>   # just the body text
-ant ls  ossucs://page/<path>   # the pages it links to, each addressable
-ant url ossucs://page/<path>   # the live https URL
+ant ls ossucs://course   # list all courses
 ```
 
 ## Development
 
 ```
 cmd/ossucs/   thin main: hands cli.NewApp to kit.Run
-cli/                 assembles the kit App from the ossucs domain
-ossucs/                the library: HTTP client, data models, and domain.go (the driver)
-docs/                tago documentation site
+cli/          assembles the kit App from the ossucs domain
+ossucs/       the library: HTTP client, data models, and domain.go (the driver)
+docs/         documentation site
 ```
 
 ```bash

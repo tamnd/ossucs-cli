@@ -2,8 +2,6 @@ package ossucs
 
 import (
 	"context"
-	"net/url"
-	"strings"
 
 	"github.com/tamnd/any-cli/kit"
 	"github.com/tamnd/any-cli/kit/errs"
@@ -19,9 +17,6 @@ import (
 // ossucs:// URIs by routing to the operations Register installs. The same
 // Domain also builds the standalone ossucs binary (see cli.NewApp), so the
 // binary and a host share one source of truth.
-//
-// This is the scaffold's starting point: one resource type, "page", served by a
-// resolver op and a list op. Add your real types here as you model the site.
 func init() { kit.Register(Domain{}) }
 
 // Domain is the ossucs driver. It carries no state; the per-run client is
@@ -33,141 +28,95 @@ type Domain struct{}
 func (Domain) Info() kit.DomainInfo {
 	return kit.DomainInfo{
 		Scheme: "ossucs",
-		Hosts:  []string{Host},
+		Hosts:  []string{"github.com/ossu/computer-science"},
 		Identity: kit.Identity{
 			Binary: "ossucs",
-			Short:  "A command line for ossucs.",
-			Long: `A command line for ossucs.
+			Short:  "Browse the OSSU Computer Science curriculum from the command line",
+			Long: `Browse the Open Source Society University Computer Science curriculum
+from the command line.
 
-ossucs reads public ossucs data over plain HTTPS, shapes it into
+ossucs reads the OSSU CS curriculum over plain HTTPS, shapes it into
 clean records, and prints output that pipes into the rest of your tools. No API
 key, nothing to run alongside it.`,
-			Site: Host,
+			Site: "github.com/ossu/computer-science",
 			Repo: "https://github.com/tamnd/ossucs-cli",
 		},
 	}
 }
 
-// Register installs the client factory and every operation onto app. A resolver
-// op (Single) names its own record type and answers `ant get`; a List op
-// enumerates a parent resource's members and answers `ant ls`.
+// Register installs the client factory and every operation onto app.
 func (Domain) Register(app *kit.App) {
 	app.SetClient(newClient)
 
-	// Resolver op: one record per id, the home of `ossucs page` and
-	// `ant get ossucs://page/<id>`.
-	kit.Handle(app, kit.OpMeta{Name: "page", Group: "read", Single: true,
-		Summary: "Fetch a page by path or URL", URIType: "page", Resolver: true,
-		Args: []kit.Arg{{Name: "ref", Help: "page path or URL"}}}, getPage)
-
-	// List op: members of a page, the home of `ossucs links` and `ant ls`.
-	// It emits page stubs, so every listed member is itself an addressable
-	// ossucs://page/ URI a host can follow.
-	kit.Handle(app, kit.OpMeta{Name: "links", Group: "read", List: true,
-		Summary: "List the pages a page links to", URIType: "page",
-		Args: []kit.Arg{{Name: "ref", Help: "page path or URL"}}}, listLinks)
+	// List op: enumerate all courses in the OSSU CS curriculum.
+	kit.Handle(app, kit.OpMeta{Name: "courses", Group: "read", List: true,
+		Summary: "List all courses in the OSSU Computer Science curriculum",
+		URIType: "course"}, listCourses)
 }
 
 // newClient builds the client from the host-resolved config, so a host and the
 // standalone binary pace and identify themselves the same way.
 func newClient(_ context.Context, cfg kit.Config) (any, error) {
-	c := NewClient()
+	dc := DefaultConfig()
 	if cfg.UserAgent != "" {
-		c.UserAgent = cfg.UserAgent
+		dc.UserAgent = cfg.UserAgent
 	}
 	if cfg.Rate > 0 {
-		c.Rate = cfg.Rate
+		dc.Rate = cfg.Rate
 	}
 	if cfg.Retries > 0 {
-		c.Retries = cfg.Retries
+		dc.Retries = cfg.Retries
 	}
 	if cfg.Timeout > 0 {
-		c.HTTP.Timeout = cfg.Timeout
+		dc.Timeout = cfg.Timeout
 	}
-	return c, nil
+	return NewClient(dc), nil
 }
 
 // --- inputs ---
-//
-// Each handler takes a typed input struct. kit fills the fields from the tags:
-// kit:"arg" is a positional argument, kit:"flag,inherit" binds the framework's
-// shared flag of the same name, and kit:"inject" receives the client newClient
-// builds.
 
-type pageRef struct {
-	Ref    string  `kit:"arg" help:"page path or URL"`
-	Client *Client `kit:"inject"`
-}
-
-type listRef struct {
-	Ref    string  `kit:"arg" help:"page path or URL"`
+type coursesInput struct {
 	Limit  int     `kit:"flag,inherit" help:"max results"`
 	Client *Client `kit:"inject"`
 }
 
 // --- handlers ---
 
-func getPage(ctx context.Context, in pageRef, emit func(*Page) error) error {
-	p, err := in.Client.GetPage(ctx, pagePath(in.Ref))
+func listCourses(ctx context.Context, in coursesInput, emit func(*Course) error) error {
+	courses, err := in.Client.Courses(ctx)
 	if err != nil {
 		return mapErr(err)
 	}
-	return emit(p)
-}
-
-func listLinks(ctx context.Context, in listRef, emit func(*Page) error) error {
-	pages, err := in.Client.PageLinks(ctx, pagePath(in.Ref), in.Limit)
-	if err != nil {
-		return mapErr(err)
-	}
-	for _, p := range pages {
-		if err := emit(p); err != nil {
+	for i, c := range courses {
+		if in.Limit > 0 && i >= in.Limit {
+			break
+		}
+		if err := emit(c); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// --- Resolver: the URI-native string functions, pure and network-free ---
+// --- Resolver ---
 
-// Classify turns any accepted input — a bare path or a full ossucs.com URL —
-// into the canonical (type, id), so `ant resolve` and `ant url` touch no network.
+// Classify turns a reference into (type, id). Courses are addressed by rank.
 func (Domain) Classify(input string) (uriType, id string, err error) {
-	id = pagePath(input)
-	if id == "" {
+	if input == "" {
 		return "", "", errs.Usage("unrecognized ossucs reference: %q", input)
 	}
-	return "page", id, nil
+	return "course", input, nil
 }
 
 // Locate is the inverse: the live https URL for a (type, id).
 func (Domain) Locate(uriType, id string) (string, error) {
-	if uriType != "page" {
+	if uriType != "course" {
 		return "", errs.Usage("ossucs has no resource type %q", uriType)
 	}
-	return BaseURL + "/" + strings.Trim(id, "/"), nil
+	return "https://github.com/ossu/computer-science", nil
 }
 
-// --- helpers ---
-
-// pagePath turns any accepted input into the canonical page id: the path of a
-// full URL on this host, or a bare path with its slashes trimmed.
-func pagePath(input string) string {
-	input = strings.TrimSpace(input)
-	if u, err := url.Parse(input); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return strings.Trim(u.Path, "/")
-	}
-	return strings.Trim(input, "/")
-}
-
-// mapErr converts a library error into the kit error kind that carries the right
-// exit code, so a host renders the same outcomes the standalone binary does. As
-// you add sentinel errors to the library, map them here, for example:
-//
-//	case errors.Is(err, ErrNotFound):
-//		return errs.NotFound("%s", err.Error())
-//	case errors.Is(err, ErrRateLimited):
-//		return errs.RateLimited("%s", err.Error())
+// mapErr converts a library error into the kit error kind that carries the right exit code.
 func mapErr(err error) error {
 	return err
 }
