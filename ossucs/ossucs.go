@@ -103,6 +103,54 @@ func (c *Client) Courses(ctx context.Context) ([]*Course, error) {
 	return courses, nil
 }
 
+// CourseByIndex returns the course at the given 1-based rank.
+func (c *Client) CourseByIndex(ctx context.Context, index int) (*Course, error) {
+	courses, err := c.Courses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, co := range courses {
+		if co.Rank == index {
+			return co, nil
+		}
+	}
+	return nil, fmt.Errorf("course at index %d not found (total: %d)", index, len(courses))
+}
+
+// CoursesBySection returns courses filtered by section name (case-insensitive partial match).
+func (c *Client) CoursesBySection(ctx context.Context, section string) ([]*Course, error) {
+	courses, err := c.Courses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(section)
+	var out []*Course
+	for _, co := range courses {
+		if strings.Contains(strings.ToLower(co.Section), q) {
+			out = append(out, co)
+		}
+	}
+	return out, nil
+}
+
+// Info returns site-level stats.
+func (c *Client) Info(ctx context.Context) (*Info, error) {
+	courses, err := c.Courses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sections := map[string]bool{}
+	for _, co := range courses {
+		sections[co.Section] = true
+	}
+	return &Info{
+		Site:     "github.com/ossu/computer-science",
+		Courses:  len(courses),
+		Sections: len(sections),
+		Source:   c.cfg.BaseURL + "/ossu/computer-science/master/README.md",
+	}, nil
+}
+
 // get fetches a path under BaseURL and returns the response body. It paces and
 // retries according to the client's settings.
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {

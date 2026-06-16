@@ -2,6 +2,8 @@ package ossucs
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"github.com/tamnd/any-cli/kit"
 	"github.com/tamnd/any-cli/kit/errs"
@@ -48,10 +50,24 @@ key, nothing to run alongside it.`,
 func (Domain) Register(app *kit.App) {
 	app.SetClient(newClient)
 
-	// List op: enumerate all courses in the OSSU CS curriculum.
+	// list: enumerate all courses (alias for courses).
+	kit.Handle(app, kit.OpMeta{Name: "list", Group: "read", List: true,
+		Summary: "List courses (optionally filtered by section)",
+		URIType: "course"}, listCoursesFiltered)
+
+	// courses: enumerate all courses.
 	kit.Handle(app, kit.OpMeta{Name: "courses", Group: "read", List: true,
 		Summary: "List all courses in the OSSU Computer Science curriculum",
 		URIType: "course"}, listCourses)
+
+	// course: one course by 1-based index.
+	kit.Handle(app, kit.OpMeta{Name: "course", Group: "read", Single: true,
+		Summary: "Show one course by index",
+		Args:    []kit.Arg{{Name: "index", Help: "1-based course index"}}}, getCourse)
+
+	// info: site-level stats.
+	kit.Handle(app, kit.OpMeta{Name: "info", Group: "read", Single: true,
+		Summary: "Print site stats (total courses, sections)"}, getInfo)
 }
 
 // newClient builds the client from the host-resolved config, so a host and the
@@ -80,6 +96,21 @@ type coursesInput struct {
 	Client *Client `kit:"inject"`
 }
 
+type coursesFilteredInput struct {
+	Section string  `kit:"flag" help:"filter by section name"`
+	Limit   int     `kit:"flag,inherit" help:"max results"`
+	Client  *Client `kit:"inject"`
+}
+
+type courseInput struct {
+	Index  string  `kit:"arg" help:"1-based course index"`
+	Client *Client `kit:"inject"`
+}
+
+type infoInput struct {
+	Client *Client `kit:"inject"`
+}
+
 // --- handlers ---
 
 func listCourses(ctx context.Context, in coursesInput, emit func(*Course) error) error {
@@ -96,6 +127,48 @@ func listCourses(ctx context.Context, in coursesInput, emit func(*Course) error)
 		}
 	}
 	return nil
+}
+
+func listCoursesFiltered(ctx context.Context, in coursesFilteredInput, emit func(*Course) error) error {
+	var courses []*Course
+	var err error
+	if in.Section != "" {
+		courses, err = in.Client.CoursesBySection(ctx, in.Section)
+	} else {
+		courses, err = in.Client.Courses(ctx)
+	}
+	if err != nil {
+		return mapErr(err)
+	}
+	for i, c := range courses {
+		if in.Limit > 0 && i >= in.Limit {
+			break
+		}
+		if err := emit(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getCourse(ctx context.Context, in courseInput, emit func(*Course) error) error {
+	idx, err := strconv.Atoi(in.Index)
+	if err != nil {
+		return errs.Usage("index must be an integer: %s", err)
+	}
+	c, err := in.Client.CourseByIndex(ctx, idx)
+	if err != nil {
+		return fmt.Errorf("%w", err)
+	}
+	return emit(c)
+}
+
+func getInfo(ctx context.Context, in infoInput, emit func(*Info) error) error {
+	info, err := in.Client.Info(ctx)
+	if err != nil {
+		return mapErr(err)
+	}
+	return emit(info)
 }
 
 // --- Resolver ---
